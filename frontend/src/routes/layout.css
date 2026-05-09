@@ -1,3 +1,21 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
+
+@font-face {
+    font-family: "BebasNeue-Regular";
+    src: url("/fonts/BebasNeue-Regular.ttf");
+}
+
+html {
+    padding: 0;
+    margin: 0;
+}
+
+
+body{
+    width: 100vw;
+    height: 100vh;
+    padding: 0;
+    margin: 0;
+}
