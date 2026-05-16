@@ -42,10 +42,10 @@ export default function LoadingBar({ progress }: { progress: number | null }) {
                     <p className="dots">.</p>
                 </span>
             </span>
-            <div className="flex w-60 max-h-0.5  transition-all ease-in-out border-b-2 border-white/10">
+            <div className="flex w-60 max-h-0.5  transition-all ease-in-out border-b-2 border-white/20">
                 <div
                     style={{ width: "0%" }}
-                    className={` p-1 self-center border-b-2 border-white`}
+                    className={` p-1 self-center border-b-2 border-red-600`}
                     ref={barRef}
                 >
                 </div>

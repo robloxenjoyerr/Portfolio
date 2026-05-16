@@ -22,7 +22,7 @@ export default function Home() {
   function handleEnter() {
 
     gsap.to(".letter", {
-      y: 500,
+      z: 500,
       opacity: 0,
       rotationX: 90,        // perspektivisch weggeneigt wie der Crawl
       transformOrigin: "50% 100%",
@@ -98,7 +98,7 @@ export default function Home() {
 
 
         <div className="greeting relative z-10 text-center">
-          <div className="font-bold flex flex-wrap gap-2 justify-center text-8xl font-plexMono drop-shadow-[0_0_20px_rgba(255,200,0,0.3)] transition-all duration-75 ease-in text-amber-300 hover:text-amber-200">
+          <div className="font-bold flex flex-wrap gap-2 justify-center text-8xl font-plexMono drop-shadow-[0_0_20px_rgba(255,200,0,0.3)] transition-all duration-100 ease-in-out hover:animate-pulse hover:scale-105  text-amber-300 hover:text-amber-200">
             {nameLetters.map((letter, index) => (
               <button onClick={handleEnter} key={index} className="font-starwars letter  inline-block">
                 {letter}
