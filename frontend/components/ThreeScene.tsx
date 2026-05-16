@@ -591,8 +591,6 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
 
                 sceneRef.current.add(distantPlanet)
             }
-
-            stepProgress()
             console.log("Generated fake planets successfully")
         } catch (err) {
             console.error(err)

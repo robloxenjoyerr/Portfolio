@@ -41,7 +41,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!sceneLoaded) return
-
+    
     gsap.from(".content", {
       opacity: 0,
       filter: "blur(5px)",
@@ -58,6 +58,7 @@ export default function Home() {
       duration: 1.2,
       ease: "power2.out",
     })
+
   }, [sceneLoaded]);
 
   function handleNavbarClick(e: string) {
@@ -69,15 +70,17 @@ export default function Home() {
     setSceneLoaded(true)
 
     if (loadingScreenRef.current) {
-      gsap.to(".loadingScreen", {
+      gsap.to(loadingScreenRef.current, {
         opacity: 0,
+        duration: 1,
+        delay: 2,
         ease: "power2.out",
-        pointerEvents: "none",
-        duration: 0.25,
+        onStart: () => {
+          loadingScreenRef.current!.style.pointerEvents = "none"
+        },
         onComplete: () => {
           loadingScreenRef.current!.style.display = "none"
-
-        }
+        }        
       })
     }
   }
