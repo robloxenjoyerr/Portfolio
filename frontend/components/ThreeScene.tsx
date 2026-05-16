@@ -600,7 +600,7 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
 
         //load and add SkyBox to scene
         try {
-            const loader = new KTX2Loader(manager)
+            /* const loader = new KTX2Loader(manager)
             loader.setTranscoderPath('/basis/')  // Transcoder-WASM wird gebraucht
             loader.detectSupport(rendererRef.current!)
 
@@ -611,7 +611,7 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
             //sceneRef.current.environment = texture
 
             stepProgress()
-            console.log("Imported and added Skybox successfully")
+            console.log("Imported and added Skybox successfully") */
         } catch (err) {
             console.error(err)
         }
