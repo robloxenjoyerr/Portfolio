@@ -1,13 +1,9 @@
-import { createNoise2D } from 'simplex-noise'
 import * as THREE from "three"
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react"
 import gsap from "gsap"
 import { EffectComposer, GLTFLoader, HDRLoader, KTX2Loader, UnrealBloomPass } from 'three/examples/jsm/Addons.js'
 import { RenderPass } from 'three/examples/jsm/Addons.js'
-import { ScreenNode } from 'three/webgpu'
-import { vec3 } from 'three/tsl'
-import { CLIENT_STATIC_FILES_RUNTIME_MAIN } from 'next/dist/shared/lib/constants'
-import { time } from 'console'
+import { createPlanet } from './ThreeHelperFunctions'
 
 export type SceneAPI = {
     focusPlanet: (id: string) => void
@@ -49,17 +45,17 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
     const planetsRef = useRef<THREE.Mesh[]>([])
     const sunRef = useRef<THREE.Group | null>(null)
     const sunShaderRef = useRef<any>(null)
-    const starFieldRef = useRef<THREE.LineSegments | null>(null)
+    const starFieldRef = useRef<THREE.Points | null>(null)
     const hyperspeedRef = useRef(0)  // nur für den Enter-Effekt
     const manager = new THREE.LoadingManager()
     const tmpCamPos = useRef<THREE.Vector3 | null>(null)
     const falconRef = useRef<THREE.Group>(new THREE.Group())
-
+    const tunnelRef = useRef<THREE.Mesh | null>(null)
+    const clockRef = useRef(new THREE.Clock())
 
     manager.onProgress = (url, loaded, total) => {
         onProgress?.(loaded / total)
     }
-
 
     function stepProgress() {
         progress += 1 / 4
@@ -117,7 +113,7 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
 
         const bloomPass = new UnrealBloomPass(
             new THREE.Vector2(container.clientWidth, container.clientHeight),
-            2.2,
+            0.6,
             0.8,
             0.4
         )
@@ -163,29 +159,40 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
                     sunRef.current.rotation.y += 0.001
                 }
 
-                if (starFieldRef.current && hyperspeedRef.current > 0) {
+                if (starFieldRef.current) {
                     const attr = starFieldRef.current.geometry.attributes.position
                     const arr = attr.array as Float32Array
                     const speedVal = hyperspeedRef.current
 
-                    for (let i = 0; i < arr.length; i += 6) {
-                        const x = arr[i], y = arr[i + 1], z = arr[i + 2]
-                        const stretch = 2 + speedVal * 8
-
-                        arr[i + 3] = x; arr[i + 4] = y; arr[i + 5] = z - stretch
-
-                        if (z > 1000) {
-                            const rx = (Math.random() - 0.5) * 2000
-                            const ry = (Math.random() - 0.5) * 2000
-                            arr[i] = rx; arr[i + 1] = ry; arr[i + 2] = -1000
-                            arr[i + 3] = rx; arr[i + 4] = ry; arr[i + 5] = -1000 - stretch
-                        }
+                    for (let i = 0; i < arr.length; i += 3) {
                         arr[i + 2] += speedVal * 4
+
+                        if (arr[i + 2] > 1000) {
+                            arr[i] = (Math.random() - 0.5) * 2000
+                            arr[i + 1] = (Math.random() - 0.5) * 2000
+                            arr[i + 2] = -1000
+                        }
                     }
                     attr.needsUpdate = true
                 }
 
+                if (tunnelRef.current && cameraRef.current) {
+                    const tunnel = tunnelRef.current
+                    const mat = tunnel.material as THREE.ShaderMaterial
 
+                    const elapsed = clockRef.current.getElapsedTime()
+
+                    mat.uniforms.time.value = elapsed * 0.35
+
+                    tunnel.position.copy(cameraRef.current.position)
+                    tunnel.position.z -= 100
+
+                    tunnel.rotation.z += 0.002
+
+                    const visible = hyperspeedRef.current > 10
+                    tunnel.visible = visible
+                    mat.uniforms.opacity.value = visible ? 1.0 : 0.0
+                }
                 composer.render()
                 //rendererRef.current.render(sceneRef.current, cameraRef.current)
             }
@@ -280,7 +287,26 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
             .to(hyperspeedRef, {
                 current: 40,
                 duration: 0.25,
-                ease: "power4.in"
+                ease: "power4.in",
+                onStart: () => {
+                    camera.updateProjectionMatrix()
+                    if (starFieldRef.current) {
+                        const mat = starFieldRef.current.material
+                        if (!Array.isArray(mat)) {
+                            const pointsMat = mat as THREE.PointsMaterial
+                            pointsMat.opacity = 0
+                            pointsMat.needsUpdate = true
+                        }
+                    }
+
+                    if (tunnelRef.current) {
+                        const mat = tunnelRef.current.material
+                        if (!Array.isArray(mat)) {
+                            mat.opacity = 1
+                            mat.needsUpdate = true
+                        }
+                    }
+                }
             }, 1)
 
             .to(fov, {
@@ -321,6 +347,14 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
             }, 3)
 
             .call(() => {
+                if (starFieldRef.current) {
+                    const mat = starFieldRef.current.material
+                    if (!Array.isArray(mat)) {
+                        const pointsMat = mat as THREE.PointsMaterial
+                        pointsMat.opacity = 0.9
+                        pointsMat.needsUpdate = true
+                    }
+                }
                 isAnimating.current = false
                 tmpCamPos.current?.copy(pos)
                 cameraTarget.current.copy(pos)  // ← damit lookAt danach auch stimmt
@@ -442,229 +476,145 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
         }
 
 
-
-        //generate stars
+        // generate stars as soft round points
         try {
             const geo = new THREE.BufferGeometry()
             const count = 20000
-            const positions = new Float32Array(count * 6)  // wieder * 6
+            const positions = new Float32Array(count * 3)
 
-            for (let i = 0; i < count * 6; i += 6) {
-                const x = (Math.random() - 0.5) * 2000
-                const y = (Math.random() - 0.5) * 2000
-                const z = (Math.random() - 0.5) * 2000
-                positions[i] = x; positions[i + 1] = y; positions[i + 2] = z
-                positions[i + 3] = x; positions[i + 4] = y; positions[i + 5] = z - 2
+            for (let i = 0; i < count * 3; i += 3) {
+                positions[i] = (Math.random() - 0.5) * 2000
+                positions[i + 1] = (Math.random() - 0.5) * 2000
+                positions[i + 2] = (Math.random() - 0.5) * 2000
             }
 
             geo.setAttribute("position", new THREE.BufferAttribute(positions, 3))
-            const mat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4 })
-            const starField = new THREE.LineSegments(geo, mat)
+
+            // round glowing star texture
+            const canvas = document.createElement("canvas")
+            canvas.width = 64
+            canvas.height = 64
+
+            const ctx = canvas.getContext("2d")
+
+            if (ctx) {
+                const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
+                gradient.addColorStop(0, "rgba(255,255,255,1)")
+                gradient.addColorStop(0.25, "rgba(255,255,255,0.8)")
+                gradient.addColorStop(0.6, "rgba(255,255,255,0.25)")
+                gradient.addColorStop(1, "rgba(255,255,255,0)")
+
+                ctx.fillStyle = gradient
+                ctx.fillRect(0, 0, 64, 64)
+            }
+
+            const starTexture = new THREE.CanvasTexture(canvas)
+
+            const mat = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.6,
+                map: starTexture,
+                transparent: true,
+                opacity: 0.9,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+                sizeAttenuation: true
+            })
+
+            const starField = new THREE.Points(geo, mat)
             starFieldRef.current = starField
             sceneRef.current.add(starField)
-            stepProgress()
-            console.log("Starfiel generated successfully")
-        } catch (err) {
-            console.error(err)
-        }
-
-
-        //generate fake planets
-        try {
-            const range = 1800  //1800
-            const randomizerClamp = 0.8
-
-            const loader = new THREE.TextureLoader(manager)
-
-            const variants = [
-                "/maps/fakePlanets/2k_earth_nightmap.jpg",
-                "/maps/fakePlanets/2k_eris_fictional.jpg",
-                "/maps/fakePlanets/2k_makemake_fictional.jpg",
-                "/maps/fakePlanets/2k_neptune.jpg",
-                "/maps/fakePlanets/2k_sun.jpg",
-                "/maps/fakePlanets/2k_venus_surface.jpg",
-
-            ]
-
-            const planetVariants: THREE.Mesh[] = []
-
-            const sunLight = new THREE.PointLight("#ffb300", 50, 800)
-            sunLight.position.set(0, 0, 0)
-            sceneRef.current.add(sunLight)
-
-            for (const v of variants) {
-                const texture = await loader.loadAsync(v)
-                texture.colorSpace = THREE.SRGBColorSpace
-                let material
-                if (v === "2k_sun.jpg") {
-                    material = new THREE.MeshStandardMaterial({
-                        map: texture,
-                        emissive: new THREE.Color("ffb300"),
-                        emissiveMap: texture,
-                        envMapIntensity: 3
-                    })
-
-
-                }
-                else {
-
-                    material = new THREE.MeshPhysicalMaterial({
-                        map: texture,
-                        roughness: 0.7,
-                        metalness: 0,
-                        envMapIntensity: 1.5
-                    })
-                }
-
-                const geometry = new THREE.SphereGeometry(2, 16, 16)
-                const planetMesh = new THREE.Mesh(geometry, material)
-
-                //atmospherelayer
-                function createAtmosphere(radius: number, color = "#66ccff") {
-                    const mat = new THREE.ShaderMaterial({
-                        transparent: true,
-                        side: THREE.BackSide,
-                        blending: THREE.AdditiveBlending,
-                        uniforms: {
-                            glowColor: { value: new THREE.Color(color) }
-                        },
-                        vertexShader: `
-                            varying vec3 vNormal;
-                            void main() {
-                                vNormal = normalize(normalMatrix * normal);
-                                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                            }
-                            `,
-                        fragmentShader: `
-                            uniform vec3 glowColor;
-                            varying vec3 vNormal;
-
-                                void main() {
-                                    float intensity = pow(0.65 - dot(vNormal, vec3(0,0,1.0)), 2.0);
-                                    gl_FragColor = vec4(glowColor, intensity * 0.8);
-                                }
-                            `
-                    })
-
-                    return new THREE.Mesh(
-                        new THREE.SphereGeometry(radius * 1.15, 32, 32),
-                        mat
-                    )
-                }
-
-                const atmosphere = createAtmosphere(2, "#66ccff")
-                planetMesh.add(atmosphere)
-
-
-
-                const glowMaterial = new THREE.MeshBasicMaterial({
-                    color: "#44aaff",
-                    transparent: true,
-                    opacity: 0.18,
-                    side: THREE.BackSide
-                })
-
-                const glowMesh = new THREE.Mesh(
-                    new THREE.SphereGeometry(2.3, 32, 32),
-                    glowMaterial
-                )
-
-                planetMesh.add(glowMesh)
-
-
-
-                planetVariants.push(planetMesh)
-
-            }
-
-            for (let i = 0; i < 500; i++) {
-
-                const randomVariant = planetVariants[
-                    Math.floor(Math.random() * planetVariants.length)
-                ]
-
-                const distantPlanet = randomVariant.clone()
-
-                const position = new THREE.Vector3((Math.random() - randomizerClamp) * range, (Math.random() - randomizerClamp) * range, (Math.random() - randomizerClamp) * range)
-
-                distantPlanet.position.set(position.x, position.y, position.z)
-
-                sceneRef.current.add(distantPlanet)
-            }
-            console.log("Generated fake planets successfully")
-        } catch (err) {
-            console.error(err)
-        }
-
-        //load and add SkyBox to scene
-        try {
-            /* const loader = new KTX2Loader(manager)
-            loader.setTranscoderPath('/basis/')  // Transcoder-WASM wird gebraucht
-            loader.detectSupport(rendererRef.current!)
-
-            const texture = await loader.loadAsync("/hdrFiles/Skybox.ktx2")
-            texture.mapping = THREE.EquirectangularReflectionMapping
-
-            //sceneRef.current.background = texture
-            //sceneRef.current.environment = texture
 
             stepProgress()
-            console.log("Imported and added Skybox successfully") */
+            console.log("Starfield generated successfully")
         } catch (err) {
             console.error(err)
         }
-    }
 
-    function createPlanet(p: any) {
-        const geometry = new THREE.SphereGeometry(1.5, 64, 64)
-        const isSun = p.id === "sun"
+        try {
+            const tunnelGeometry = new THREE.CylinderGeometry(80, 80, 700, 128, 64, false)
+            tunnelGeometry.rotateX(Math.PI / 2)
 
-        const material = new THREE.MeshStandardMaterial({
-            color: isSun ? "#ffb300" : 0xffffff,
-            emissive: isSun ? "#ff7a00" : undefined,
-            emissiveIntensity: isSun ? 2 : 0
-        })
+            const tunnelMaterial = new THREE.ShaderMaterial({
+                transparent: true,
+                side: THREE.BackSide,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
 
-        const mesh = new THREE.Mesh(geometry, material)
+                uniforms: {
+                    time: { value: 0 },
+                    opacity: { value: 0 }
+                },
 
-        if (isSun) {
+                vertexShader: `
+            varying vec2 vUv;
+            varying vec3 vPos;
 
-            const light = new THREE.PointLight("#ffb300", 80, 1200)
-            mesh.add(light)
+            void main() {
+                vUv = uv;
+                vPos = position;
 
-            const coreGlow = new THREE.Mesh(
-                new THREE.SphereGeometry(1.9, 32, 32),
-                new THREE.MeshBasicMaterial({
-                    color: "#ff6600",
-                    transparent: true,
-                    opacity: 0.12,
-                    side: THREE.BackSide
-                })
-            )
-            mesh.add(coreGlow)
+                gl_Position =
+                    projectionMatrix *
+                    modelViewMatrix *
+                    vec4(position, 1.0);
+            }
+        `,
 
-            const corona1 = new THREE.Mesh(
-                new THREE.SphereGeometry(2.5, 64, 64),
-                new THREE.MeshStandardMaterial({
-                    color: "#ff6600",
-                    transparent: true,
-                    opacity: 0.25,
-                    side: THREE.BackSide,
-                    blending: THREE.AdditiveBlending
-                })
-            )
-            mesh.add(corona1)
+                fragmentShader: `
+            uniform float time;
+            uniform float opacity;
 
-            const corona2 = corona1.clone()
-            corona2.scale.set(1.2, 1.2, 1.2)
-            corona2.material = corona1.material.clone()
-            corona2.material.opacity = 0.15
-            mesh.add(corona2)
+            varying vec2 vUv;
+            varying vec3 vPos;
+
+            float pulse(float x, float speed) {
+                return 0.5 + 0.5 * sin(x * 12.0 - time * speed);
+            }
+
+            float band(float x, float count, float offset) {
+                return smoothstep(0.48, 0.52, abs(fract(x * count + offset) - 0.5));
+            }
+
+            void main() {
+                vec2 uv = vUv;
+                float depth = 1.0 - uv.y;
+                float angle = uv.x * 6.28318;
+
+                float radial = 1.0 - length(vec2(uv.x - 0.5, uv.y - 0.5)) * 1.6;
+                radial = clamp(radial, 0.0, 1.0);
+
+                float glow = smoothstep(0.18, 0.55, radial);
+                float rings = band(depth, 10.0, time * 0.35);
+                float spokes = band(angle / 6.28318, 20.0, time * 0.14);
+                float centerLine = smoothstep(0.0, 0.06, 1.0 - abs(uv.x - 0.5) * 2.0);
+                float streak = smoothstep(0.98, 1.0, abs(fract(depth * 32.0 + time * 0.9) - 0.5));
+
+                vec3 base = mix(vec3(0.01, 0.05, 0.14), vec3(0.05, 0.24, 0.54), radial);
+                vec3 accent = vec3(0.4, 0.85, 1.0) * (0.18 * rings + 0.2 * spokes + 0.15 * centerLine + 0.1 * streak);
+                vec3 color = base + accent;
+
+                float alpha = opacity * clamp((0.35 + glow * 0.65) * (0.12 + rings * 0.35 + centerLine * 0.28 + streak * 0.2), 0.0, 1.0);
+
+                gl_FragColor = vec4(color, alpha);
+            }
+        `
+            })
+
+            const tunnel = new THREE.Mesh(tunnelGeometry, tunnelMaterial)
+            tunnel.position.set(0, 0, 250)
+            tunnel.visible = false
+
+            tunnelRef.current = tunnel
+            sceneRef.current.add(tunnel)
+        } catch (err) {
+            console.error("Error creating hyperspace tunnel:", err)
         }
 
-
-        return mesh
     }
+
+
+
 
 
     useImperativeHandle(ref, () => ({
