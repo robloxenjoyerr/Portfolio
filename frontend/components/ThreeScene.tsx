@@ -47,11 +47,15 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
     const sunShaderRef = useRef<any>(null)
     const starFieldRef = useRef<THREE.Points | null>(null)
     const hyperspeedRef = useRef(0)  // nur für den Enter-Effekt
+    const displayedHyperspeedRef = useRef(0)
     const manager = new THREE.LoadingManager()
     const tmpCamPos = useRef<THREE.Vector3 | null>(null)
     const falconRef = useRef<THREE.Group>(new THREE.Group())
     const tunnelRef = useRef<THREE.Mesh | null>(null)
     const clockRef = useRef(new THREE.Clock())
+    const enterSoundRef = useRef<HTMLAudioElement | null>(null)
+    const exitSoundRef = useRef<HTMLAudioElement | null>(null)
+    const hyperSpaceRef = useRef<HTMLAudioElement | null>(null)
 
     manager.onProgress = (url, loaded, total) => {
         onProgress?.(loaded / total)
@@ -162,7 +166,9 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
                 if (starFieldRef.current) {
                     const attr = starFieldRef.current.geometry.attributes.position
                     const arr = attr.array as Float32Array
-                    const speedVal = hyperspeedRef.current
+                    // smooth displayed hyperspeed to avoid abrupt jumps
+                    displayedHyperspeedRef.current = THREE.MathUtils.lerp(displayedHyperspeedRef.current, hyperspeedRef.current, 0.08)
+                    const speedVal = displayedHyperspeedRef.current
 
                     for (let i = 0; i < arr.length; i += 3) {
                         arr[i + 2] += speedVal * 4
@@ -189,9 +195,11 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
 
                     tunnel.rotation.z += 0.002
 
-                    const visible = hyperspeedRef.current > 10
-                    tunnel.visible = visible
-                    mat.uniforms.opacity.value = visible ? 1.0 : 0.0
+                    // use the smoothed hyperspeed for visibility and opacity
+                    const visible = displayedHyperspeedRef.current > 10
+                    tunnel.visible = visible || mat.uniforms.opacity.value > 0.001
+                    const targetOpacity = displayedHyperspeedRef.current > 10 ? 0.6 : 0.0
+                    mat.uniforms.opacity.value = THREE.MathUtils.lerp(mat.uniforms.opacity.value, targetOpacity, 0.08);
                 }
                 composer.render()
                 //rendererRef.current.render(sceneRef.current, cameraRef.current)
@@ -279,6 +287,14 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
                 onUpdate: () => {
                     camera.fov = fov.state
                     camera.updateProjectionMatrix()
+                },
+                onStart: () => {
+
+                    if (enterSoundRef.current) {
+                        enterSoundRef.current.currentTime = 0
+                        enterSoundRef.current.play()
+                    }
+
                 }
             }, 0)
 
@@ -294,7 +310,7 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
                         const mat = starFieldRef.current.material
                         if (!Array.isArray(mat)) {
                             const pointsMat = mat as THREE.PointsMaterial
-                            pointsMat.opacity = 0
+                            gsap.to(pointsMat, { opacity: 0, duration: 0.6 })
                             pointsMat.needsUpdate = true
                         }
                     }
@@ -302,9 +318,19 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
                     if (tunnelRef.current) {
                         const mat = tunnelRef.current.material
                         if (!Array.isArray(mat)) {
-                            mat.opacity = 1
+                            // set shader uniform opacity to a softer mist value
+                            if ((mat as any).uniforms && (mat as any).uniforms.opacity) {
+                                (mat as any).uniforms.opacity.value = 0.6
+                            }
                             mat.needsUpdate = true
                         }
+                    }
+
+                },
+                onComplete: () => {
+                    if (hyperSpaceRef.current) {
+                        hyperSpaceRef.current.currentTime = 0
+                        hyperSpaceRef.current.play()
                     }
                 }
             }, 1)
@@ -327,14 +353,52 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
                 z: targetPos.z,
                 duration: 1.8,
                 ease: "power2.inOut",
-            }, 1.7)
+            }, 2.4)
 
             // Phase 3 — Abbremsen
             .to(hyperspeedRef, {
                 current: 0,
                 duration: 0.6,
-                ease: "power3.out"
-            }, 3)
+                ease: "power3.out",
+                onStart: () => {
+                    try {
+                        if (exitSoundRef.current) {
+                            exitSoundRef.current.currentTime = 0
+                            exitSoundRef.current.play()
+                        }
+
+                        if (hyperSpaceRef.current) {
+                            hyperSpaceRef.current.pause()
+                        }
+                    } catch (e) {
+                        console.warn('Failed to play exit hyperspace sound', e)
+                    }
+                    // quickly snap camera and FOV toward target for an almost-instant arrival
+                    try {
+                        if (cameraRef.current) {
+                            gsap.to(cameraRef.current.position, {
+                                x: targetPos.x,
+                                y: targetPos.y,
+                                z: targetPos.z,
+                                duration: 0.12,
+                                ease: 'power4.out'
+                            })
+                        }
+
+                        gsap.to(fov, {
+                            state: 72,
+                            duration: 0.12,
+                            ease: 'power4.out',
+                            onUpdate: () => {
+                                camera.fov = fov.state
+                                camera.updateProjectionMatrix()
+                            }
+                        })
+                    } catch (e) {
+                        // ignore
+                    }
+                }
+            }, 3.5)
 
             .to(fov, {
                 state: 72,
@@ -344,14 +408,14 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
                     camera.fov = fov.state
                     camera.updateProjectionMatrix()
                 }
-            }, 3)
+            }, 3.5)
 
             .call(() => {
                 if (starFieldRef.current) {
                     const mat = starFieldRef.current.material
                     if (!Array.isArray(mat)) {
                         const pointsMat = mat as THREE.PointsMaterial
-                        pointsMat.opacity = 0.9
+                        gsap.to(pointsMat, { opacity: 0.9, duration: 0.8 })
                         pointsMat.needsUpdate = true
                     }
                 }
@@ -432,6 +496,27 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
 
     async function initPage(container: HTMLDivElement | null) {
         if (!container || !sceneRef.current) return
+
+        // preload hyperspace sound effects
+        try {
+            const enterAudio = new Audio('/soundeffects/bh-enter-hyperspace.mp3')
+            enterAudio.preload = 'auto'
+            enterAudio.volume = 0.6
+            enterSoundRef.current = enterAudio
+
+            const exitAudio = new Audio('/soundeffects/bh-exit-hyperspace.mp3')
+            exitAudio.preload = 'auto'
+            exitAudio.volume = 0.6
+            exitSoundRef.current = exitAudio
+
+            const hyperSpaceAudio = new Audio('/soundeffects/freesound_community-space-ship-102433.mp3')
+            hyperSpaceAudio.preload = 'auto'
+            hyperSpaceAudio.volume = 0.3
+            hyperSpaceAudio.loop = true
+            hyperSpaceRef.current = hyperSpaceAudio
+        } catch (e) {
+            console.warn('Failed to load hyperspace audio', e)
+        }
 
         //import millinizum falcon
         try {
@@ -532,7 +617,7 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
         }
 
         try {
-            const tunnelGeometry = new THREE.CylinderGeometry(80, 80, 700, 128, 64, false)
+            const tunnelGeometry = new THREE.CylinderGeometry(80, 80, 900, 128, 64, false)
             tunnelGeometry.rotateX(Math.PI / 2)
 
             const tunnelMaterial = new THREE.ShaderMaterial({
@@ -540,6 +625,7 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
                 side: THREE.BackSide,
                 depthWrite: false,
                 blending: THREE.AdditiveBlending,
+                toneMapped: false,
 
                 uniforms: {
                     time: { value: 0 },
@@ -572,29 +658,97 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
                 return 0.5 + 0.5 * sin(x * 12.0 - time * speed);
             }
 
-            float band(float x, float count, float offset) {
-                return smoothstep(0.48, 0.52, abs(fract(x * count + offset) - 0.5));
+            float hash(vec2 p) {
+                p = fract(p * vec2(123.34, 456.21));
+                p += dot(p, p + 45.32);
+                return fract(p.x * p.y);
+            }
+
+            float noise(vec2 p) {
+                vec2 i = floor(p);
+                vec2 f = fract(p);
+
+                float a = hash(i);
+                float b = hash(i + vec2(1.0, 0.0));
+                float c = hash(i + vec2(0.0, 1.0));
+                float d = hash(i + vec2(1.0, 1.0));
+
+                vec2 u = f * f * (3.0 - 2.0 * f);
+
+                return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+            }
+
+            float fbm(vec2 p) {
+                float v = 0.0;
+                float amp = 0.5;
+
+                for (int i = 0; i < 5; i++) {
+                    v += amp * noise(p);
+                    p *= 2.02;
+                    amp *= 0.55;
+                }
+
+                return v;
             }
 
             void main() {
                 vec2 uv = vUv;
+
                 float depth = 1.0 - uv.y;
                 float angle = uv.x * 6.28318;
 
                 float radial = 1.0 - length(vec2(uv.x - 0.5, uv.y - 0.5)) * 1.6;
                 radial = clamp(radial, 0.0, 1.0);
 
-                float glow = smoothstep(0.18, 0.55, radial);
-                float rings = band(depth, 10.0, time * 0.35);
-                float spokes = band(angle / 6.28318, 20.0, time * 0.14);
-                float centerLine = smoothstep(0.0, 0.06, 1.0 - abs(uv.x - 0.5) * 2.0);
-                float streak = smoothstep(0.98, 1.0, abs(fract(depth * 32.0 + time * 0.9) - 0.5));
+                float glow = smoothstep(0.15, 0.9, radial);
 
-                vec3 base = mix(vec3(0.01, 0.05, 0.14), vec3(0.05, 0.24, 0.54), radial);
-                vec3 accent = vec3(0.4, 0.85, 1.0) * (0.18 * rings + 0.2 * spokes + 0.15 * centerLine + 0.1 * streak);
-                vec3 color = base + accent;
+                float r = log(depth + 0.045) * 1.9 - time * 1.75;
+                vec2 streakCoord = vec2(angle * 15.5, r * 1.15);
 
-                float alpha = opacity * clamp((0.35 + glow * 0.65) * (0.12 + rings * 0.35 + centerLine * 0.28 + streak * 0.2), 0.0, 1.0);
+                float n = fbm(streakCoord);
+                n = pow(clamp(n, 0.0, 1.0), 2.6);
+
+                float n2 = fbm(streakCoord * 2.5 + 17.0);
+                float streaks = clamp(n * 1.65 + n2 * 0.35, 0.0, 1.0);
+
+                float grain = fbm(streakCoord * 6.5 - time * 2.8) * 0.22;
+
+                float centerLine = smoothstep(0.0, 0.075, 1.0 - abs(uv.x - 0.5) * 2.0);
+                float pulseCore = pulse(depth, 1.5) * glow;
+
+                // Je weiter hinten, desto stärker der helle Tunnel-End-Eindruck
+                float farEnd = smoothstep(0.62, 1.0, depth);
+                float farEndPulse = 0.75 + 0.25 * sin(time * 3.5);
+
+                // Dunkles kräftiges Blau
+                vec3 deepBlue = vec3(0.005, 0.025, 0.11);
+
+                // Mittleres sattes Hyperspace-Blau
+                vec3 richBlue = vec3(0.02, 0.17, 0.55);
+
+                // Helles elektrisches Cyan-Blau wie im Bild
+                vec3 brightBlue = vec3(0.22, 0.62, 1.35);
+
+                // Weiß-blauer Kern am Ende
+                vec3 whiteBlue = vec3(0.85, 1.15, 1.6);
+
+                vec3 base = mix(deepBlue, richBlue, radial);
+                base += richBlue * glow * 0.35;
+
+                vec3 accent = brightBlue * (streaks * 0.65 + grain * 0.65);
+                vec3 core = whiteBlue * pulseCore * 0.28;
+
+                // Far-End-Glow: lässt es aussehen, als wäre hinten ein sehr weit entferntes weißes Licht
+                vec3 farGlow = whiteBlue * farEnd * farEndPulse * 0.95;
+                farGlow += brightBlue * farEnd * streaks * 0.45;
+
+                vec3 color = base + accent + core + farGlow;
+
+                float mist = 0.22 + glow * 0.85;
+                float streakAlpha = 0.18 + streaks * 0.65 + grain * 0.35;
+                float farAlpha = farEnd * 0.55;
+
+                float alpha = opacity * clamp(mist * streakAlpha + farAlpha, 0.0, 1.0) * 0.85;
 
                 gl_FragColor = vec4(color, alpha);
             }
@@ -605,12 +759,50 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
             tunnel.position.set(0, 0, 250)
             tunnel.visible = false
 
+            // Weißes Licht ganz hinten im Hyperspace-Tunnel
+            const lightCanvas = document.createElement("canvas")
+            lightCanvas.width = 256
+            lightCanvas.height = 256
+
+            const ctx = lightCanvas.getContext("2d")
+
+            if (ctx) {
+                const gradient = ctx.createRadialGradient(128, 128, 0, 128, 128, 128)
+
+                gradient.addColorStop(0.0, "rgba(255, 255, 255, 1.0)")
+                gradient.addColorStop(0.18, "rgba(180, 230, 255, 0.95)")
+                gradient.addColorStop(0.42, "rgba(70, 160, 255, 0.45)")
+                gradient.addColorStop(1.0, "rgba(0, 20, 90, 0.0)")
+
+                ctx.fillStyle = gradient
+                ctx.fillRect(0, 0, 256, 256)
+            }
+
+            const endLightTexture = new THREE.CanvasTexture(lightCanvas)
+
+            const endLightMaterial = new THREE.SpriteMaterial({
+                map: endLightTexture,
+                transparent: true,
+                opacity: 0.85,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+                toneMapped: false
+            })
+
+            const endLight = new THREE.Sprite(endLightMaterial)
+
+            // Bei 900 Tunnel-Länge liegt das Ende ungefähr bei +450.
+            // Leicht davor setzen, damit es sichtbar im Tunnel sitzt.
+            endLight.position.set(0, 0, 430)
+            endLight.scale.set(180, 180, 1)
+
+            tunnel.add(endLight)
+
             tunnelRef.current = tunnel
             sceneRef.current.add(tunnel)
         } catch (err) {
             console.error("Error creating hyperspace tunnel:", err)
         }
-
     }
 
 

@@ -18,6 +18,14 @@ export default function Home() {
   const sceneRef = useRef<SceneAPI>(null)
   const [hasEntered, setHasEntered] = useState<boolean>(false)
 
+  function handleButtonHover() {
+    const audiSource = "/soundeffects/freesound_community-button-hover-82022.mp3"
+    const audio = new Audio(audiSource)
+    audio.volume = 0.4
+    audio.play().catch((e) => {
+      console.warn('Failed to play button hover sound', e)
+    })
+  }
 
   function handleEnter() {
 
@@ -100,7 +108,7 @@ export default function Home() {
         <div className="greeting relative z-10 text-center">
           <div className="font-bold flex flex-wrap gap-2 justify-center text-8xl font-plexMono drop-shadow-[0_0_20px_rgba(255,200,0,0.3)] transition-all duration-100 animate-pulse ease-in-out hover:animate-pulse hover:scale-105  text-amber-300 hover:text-amber-200">
             {nameLetters.map((letter, index) => (
-              <button onClick={handleEnter} key={index} className="font-starwars letter  inline-block">
+              <button onClick={handleEnter} key={index} onMouseEnter={handleButtonHover} className="font-starwars letter  inline-block">
                 {letter}
               </button>
             ))}
