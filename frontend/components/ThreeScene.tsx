@@ -317,13 +317,16 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
 
                     if (tunnelRef.current) {
                         const mat = tunnelRef.current.material
-                        if (!Array.isArray(mat)) {
-                            // set shader uniform opacity to a softer mist value
-                            if ((mat as any).uniforms && (mat as any).uniforms.opacity) {
-                                (mat as any).uniforms.opacity.value = 0.7
+                        setTimeout(() => {
+
+                            if (!Array.isArray(mat)) {
+                                // set shader uniform opacity to a softer mist value
+                                if ((mat as any).uniforms && (mat as any).uniforms.opacity) {
+                                    (mat as any).uniforms.opacity.value = 0.7
+                                }
+                                mat.needsUpdate = true
                             }
-                            mat.needsUpdate = true
-                        }
+                        }, 200)
                     }
 
                 },
@@ -373,30 +376,8 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
                     } catch (e) {
                         console.warn('Failed to play exit hyperspace sound', e)
                     }
-                    // quickly snap camera and FOV toward target for an almost-instant arrival
-                    try {
-                        if (cameraRef.current) {
-                            gsap.to(cameraRef.current.position, {
-                                x: targetPos.x,
-                                y: targetPos.y,
-                                z: targetPos.z,
-                                duration: 0.12,
-                                ease: 'power4.out'
-                            })
-                        }
-
-                        gsap.to(fov, {
-                            state: 72,
-                            duration: 0.12,
-                            ease: 'power4.out',
-                            onUpdate: () => {
-                                camera.fov = fov.state
-                                camera.updateProjectionMatrix()
-                            }
-                        })
-                    } catch (e) {
-                        // ignore
-                    }
+                    // Removing the extra camera/FOV snap tween here prevents conflicting animations
+                    // while the main travel and FOV timeline are still active.
                 }
             }, 3.5)
 
@@ -422,7 +403,8 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
                 isAnimating.current = false
                 tmpCamPos.current?.copy(pos)
                 cameraTarget.current.copy(pos)  // ← damit lookAt danach auch stimmt
-            })
+                cameraRef.current?.lookAt(pos)
+            }, [], 4.2)
 
     }, [hasEntered])
 
