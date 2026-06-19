@@ -320,7 +320,7 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
                         if (!Array.isArray(mat)) {
                             // set shader uniform opacity to a softer mist value
                             if ((mat as any).uniforms && (mat as any).uniforms.opacity) {
-                                (mat as any).uniforms.opacity.value = 0.6
+                                (mat as any).uniforms.opacity.value = 0.7
                             }
                             mat.needsUpdate = true
                         }
@@ -336,14 +336,14 @@ const ThreeScene = forwardRef<SceneAPI, Props>(function ThreeScene(
             }, 1)
 
             .to(fov, {
-                state: 120,
+                state: 110,
                 duration: 0.25,
-                ease: "power4.in",
+                ease: "easeInQuad",
                 onUpdate: () => {
                     camera.fov = fov.state
                     camera.updateProjectionMatrix()
                 }
-            }, 1)
+            }, 1.1)
 
             //3
 
